@@ -4,23 +4,54 @@ org 100h
 
 locals @@
 
-INT08H   = 08h
-INT09H   = 09h
-VIDEOSEG = 0b800h
-COLOR    = 4eh
-KEYB_PPI = 61h
-KEYB_BUF = 60h
-SIGN_BIT = 80h
+INT08H        = 08h
+INT09H        = 09h
+VIDEOSEG      = 0b800h
+COLOR         = 4eh
+KEYB_PPI      = 61h
+KEYB_BUF      = 60h
+SIGN_BIT      = 80h
 
-LETTER_A = 'A'
-ZERO     = '0'
-F1       = 3Bh
-F2       = 3Ch
+LETTER_A      = 'A'
+ZERO          = '0'
+F2            = 3Ch
+F1            = 3Bh
+
+TABLELEN      = 11d
+TABLEHEIGHT   = 12d
+X_START       = 80d - TABLELEN
+Y_START       = 1d
+
+DIFFERENCE    = (80d - TABLELEN) * 2
+VIDEOSEG_SIZE = 80d * 25d * 2d
+
+VIDEOSEG_0    = (Y_START * 80d + X_START) * 2d
+VIDEOSEG_1    = VIDEOSEG_0 + VIDEOSEG_SIZE / 2 - 160d
+VIDEOSEG_2    = VIDEOSEG_1 + TABLELEN * 2
 
 END_OF_STRING = 0
 
+.skip  macro
+       add di, 160d - TABLELEN * 2
+       sub si, 3
+       endm
+
 start:
-    jmp execute
+
+;        mov ax, cs
+;        mov ds, ax
+;        mov si, offset cs:SYMBOLS
+;        mov dh, COLOR
+;        mov bl, Y_START
+;        mov bh, X_START
+;        mov ax, VIDEOSEG
+;        mov es, ax
+;        push di es si ds dx cx bx ax
+;        mov  di, VIDEOSEG_0 + 80 * 2 + 4
+;        push di
+;        call DrawFrame
+
+        jmp execute
 
 execute:
 ;======Now Lets Change Interruption Vectors======
@@ -57,6 +88,8 @@ execute:
 
 Hack08:
 ;======It Is Hacked Int08h=======================
+
+;======Checking Mode in top left corner==========
         push es di ax
         
         mov ax, VIDEOSEG
@@ -70,17 +103,36 @@ Hack08:
         stosw
 
         pop ax di es
+;================================================
 
         cmp cs:activated, 0h
         jz @@exit
 
-        push ax bx cx dx es di ds si
+;======Saving Registers==========================
+        push di es si ds dx cx bx ax
         pushf
+;================================================
 
+;======Saving Registers to Print=================
+;       push di es si ds dx cx bx ax
+;================================================
+
+;======Here I have to save changes===============
+;       params
+;       call GetChanges
+;================================================
+
+;======Here I have to Draw Frame with Registers==
+;       params
+;       call DrawFrame
+;================================================
+
+;======Print Register AX===========================
         mov bx, ax
 
         mov ax, offset cs:buff
         mov di, ax
+
         mov ax, cs
         mov es, ax
 
@@ -93,6 +145,7 @@ Hack08:
 
         mov ax, offset cs:buff
         mov si, ax
+
         mov ax, cs
         mov ds, ax
 
@@ -100,13 +153,359 @@ Hack08:
 
         mov cx, 4h
         call PrintString
+;================================================
 
+;======Recovering Registers======================
         popf
-        pop si ds di es dx cx bx ax
+        pop  ax bx cx dx ds si es di
+;================================================
 
 @@exit:
         db 0EAh
 OldInt8 dd 000h  
+;================================================
+
+Hack09:
+        push ax
+
+;======Int09h Activates & Deactivates Spying=====
+        in al, KEYB_BUF              ; Got Scan Code From 60h Port
+        
+        cmp al, F1                   ; If Pressed F1 activated
+        je @@activate
+
+        cmp al, F2                   ; If Pressed F2 unactivated
+        jne @@exit_default
+
+@@unactivate:
+        mov byte ptr cs:activated, 00h
+
+;======Here I have to recover area===============
+        push cx es di si
+        pushf
+
+        mov  ax, VIDEOSEG
+        mov  es, ax
+
+        mov  si, VIDEOSEG_1
+        mov  di, VIDEOSEG_0
+
+        call SaveArea
+
+        popf
+        pop  si di es cx
+;================================================
+
+        jmp @@exit_intercept
+
+@@activate:
+
+;======Saving Registers==========================
+        push di es si ds dx cx bx ax
+        pushf
+;================================================
+
+;======Saving Registers To Print=================
+;       push di es si ds dx cx bx ax
+;================================================
+
+;======Here I have to Save Area==================
+        mov  ax, VIDEOSEG
+        mov  es, ax
+
+        mov  si, VIDEOSEG_0
+        mov  di, VIDEOSEG_1
+
+        call SaveArea
+;================================================
+
+;======Here I have to Draw Frame with Regs=======
+        mov ax, cs
+        mov ds, ax
+
+        mov si, offset cs:SYMBOLS
+        mov dh, COLOR
+        
+        mov bl, Y_START
+        mov bh, X_START
+
+        mov ax, VIDEOSEG
+        mov es, ax
+
+        call DrawTable
+;================================================
+
+;======Here I want to Save Copy of Frame=========
+        mov  ax, VIDEOSEG
+        mov  es, ax
+
+        mov  si, VIDEOSEG_0
+        mov  di, VIDEOSEG_2
+
+        call SaveArea
+;================================================
+
+;======Recovering Registers======================
+        popf
+        pop  ax bx cx dx ds si es di
+;================================================
+
+        mov byte ptr cs:activated, 02h
+
+@@exit_intercept:
+
+;======Sending ACK===============================
+        in  al, KEYB_PPI             ; Send ACK To
+        or  al, SIGN_BIT             ; Keyboard
+        out KEYB_PPI, al             
+        xor al, SIGN_BIT
+        out KEYB_PPI, al
+;================================================
+
+;======Sending EOI===============================
+        mov al, 20h                  ; Send Signal
+        out 20h, al                  ; End Of Interruption
+;================================================
+
+        pop ax
+
+        iret
+
+@@exit_default:
+        pop ax
+
+        db 0EAh
+OldInt9 dd 000h       
+;================================================
+
+;================================================
+; ES - VIDEOSEG
+; macro TABLELEN    = length
+; macro TABLEHEIGHT = height
+; SI - index of original
+; DI - index of destination
+; Destr: CX, AX
+;================================================
+SaveArea proc
+
+        mov cx, TABLEHEIGHT
+
+@@save_area:
+        xchg cx, ax
+
+        mov cx, TABLELEN
+
+@@save_line:
+        movs word ptr es:[di], es:[si]
+        loop @@save_line
+
+        add di, DIFFERENCE
+        add si, DIFFERENCE
+
+        xchg cx, ax
+        loop @@save_area
+
+        ret
+         endp
+;================================================
+
+;================================================
+; Entry:
+; DS - current segment
+; SI - index of 9 symbol string TL corner, TM elem, TR corner
+;                               ML   elem, MM elem, MR   elem
+;                               BL corner, BM elem, BR corner
+; macro TABLELEN    = length
+; macro TABLEHEIGHT = height
+; DH - symbol attribute
+; BL - number of first line   (numeration from 0)
+; BH - number of first symbol (numeration from 0)
+; ES - VIDEOSEG (0b800h)
+; Stack:
+; ELEM ON TOP - index from where program will write AX 1234
+; ELEMS from TOP: ax bx cx dx ds si es di           ^
+; That would be printed in that format ------------ ^
+; Destr: DI, CX, AX, DX
+;================================================
+DrawFrame proc
+
+        call DrawTable
+
+        pop  bx
+        pop  di
+        push di
+        push bx
+
+        push di
+
+        mov ax, cs
+        mov ds, ax
+
+        mov si, offset cs:REGS
+        mov ah, COLOR
+
+        mov cx, 8h
+@@printing_names:
+        xchg cx, dx
+
+        mov  cx, 2h
+        call PrintString
+        add  di, (80d - 2d) * 2d
+
+        xchg cx, dx
+        loop @@printing_names
+
+@@next:
+        pop  di
+        add  di, 3d * 2
+
+        mov cx, 8h
+@@printing_numbers:
+        xchg cx, dx
+
+        pop bx             ; number to print
+
+        push di
+
+        mov si, cs         ; for now I have to
+        mov es, si         ; print it in buff
+        
+        mov di, offset cs:buff
+
+        push dx
+        call Itoa16     
+        pop dx
+
+        mov si, cs
+        mov ds, si
+
+        mov si, VIDEOSEG
+        mov es, si
+
+        mov si, offset cs:buff
+
+        pop di
+
+        mov ah, COLOR
+
+        mov cx, 4h
+        call PrintString
+
+        add  di, (80d - 4d) * 2d
+        
+        xchg cx, dx
+        loop @@printing_numbers
+
+          endp
+;================================================
+
+
+;================================================
+; Entry:
+; DS - current segment
+; SI - index of 9 symbol string TL corner, TM elem, TR corner
+;                               ML   elem, MM elem, MR   elem
+;                               BL corner, BM elem, BR corner
+; macro TABLELEN    = length
+; macro TABLEHEIGHT = height
+; DH - symbol attribute
+; BL - number of first line   (numeration from 0)
+; BH - number of first symbol (numeration from 0)
+; ES - VIDEOSEG (0b800h)
+; Destr: DI, CX, AX, DX
+;================================================
+DrawTable proc
+       
+        mov al, bl
+        mov ah, 0h
+        mov cx, 50h
+        mov bl, dh        ; saving DH from mul
+        mul cx            ; + Y_START * 80d
+        mov cl, bh
+        add ax, cx        ; + X_START
+        mov cx, 2h
+        mul cx
+
+        mov di, ax        ; DI = (X_START + Y_START * 80) * 2
+
+        mov ah, bl        ; AH = attribute
+        mov cx, TABLELEN
+        call DrawLine
+
+        add di, 160d - TABLELEN * 2d
+
+        mov cx, TABLEHEIGHT
+        sub cx, 2
+
+@@cycle:
+        xchg cx, dx
+
+        mov cx, TABLELEN
+        call DrawLine
+        .skip
+
+        xchg cx, dx
+        loop @@cycle
+
+@@last:
+        add si, 3
+        add cx, TABLELEN
+        call DrawLine
+
+        ret
+
+          endp
+;================================================
+
+
+;================================================
+; Entry:
+; DS - current segment
+; SI - index of 3 symbol string, LEFT ELEM, MID ELEMs, RIGHT ELEM
+; CX - string length
+; DI - index of line start
+; AH - symbol attribute
+; ES - VIDEOSEG (0b800h)
+; Destr: AX, CX
+;================================================
+DrawLine proc
+
+        cld
+
+        lodsb
+        stosw
+
+        sub cx, 2
+        lodsb
+        rep stosw
+
+        lodsb
+        stosw
+
+        ret
+
+         endp
+;================================================
+
+
+;================================================
+; Entry:
+; CX - number of symbols to print
+; AH - COLOR
+; ES - VIDEOSEG
+; DI - start cell in VIDEOSEG
+; DS - segment of reading
+; SI - index of string
+; Destr: AX, CX
+;================================================
+PrintString      proc
+        push ax cx
+@@out:  lodsb
+        stosw        
+        loop @@out
+        pop  cx ax
+        ret
+            endp
 ;================================================
 
 ;================================================
@@ -117,6 +516,8 @@ OldInt8 dd 000h
 ; Destr: AX, DX, CX
 ;================================================
 Itoa16 proc
+
+        push ax cx dx
 
         mov dx, di
         cld
@@ -158,68 +559,12 @@ Itoa16 proc
         cmp bx, di           ; TILT
         jb @@reverse         ; 
 
+        pop dx cx ax
+
+@@ret:
         ret
 
         endp
-;================================================
-
-Hack09:
-;======Int09h Activates & Deactivates Spying=====
-        push ax
-
-        in al, KEYB_BUF              ; Got Scan Code From 60h Port
-        
-        cmp al, F1                   ; If Pressed F1 activated
-        je @@activate
-
-        cmp al, F2                   ; If Pressed F2 unactivated
-        jne @@exit_default
-        mov byte ptr cs:activated, 00h
-        jmp @@exit_intercept
-
-@@activate:
-        mov byte ptr cs:activated, 02h
-
-@@exit_intercept:
-
-;======Sending ACK===============================
-        in  al, KEYB_PPI             ; Send ACK To
-        or  al, SIGN_BIT             ; Keyboard
-        out KEYB_PPI, al             
-        xor al, SIGN_BIT
-        out KEYB_PPI, al
-;================================================
-
-;======Sending EOI===============================
-        mov al, 20h                  ; Send Signal
-        out 20h, al                  ; End Of Interruption
-;================================================
-
-        pop ax
-
-        iret
-
-@@exit_default:
-        pop ax
-
-        db 0EAh
-OldInt9 dd 000h       
-;================================================
-
-;================================================
-; CX - number of symbols to print
-; AH - COLOR
-; ES - VIDEOSEG
-; DI - start cell in VIDEOSEG
-; DS - segment of reading
-; SI - index of string
-;================================================
-PrintString proc
-@@out:  lodsb
-        stosw        
-        loop @@out
-        ret
-            endp
 ;================================================
 
 activated db 0          ; 0     if turned off
@@ -227,14 +572,19 @@ activated db 0          ; 0     if turned off
 
 buff db 4 dup(0)
 
+SYMBOLS db 3 dup(3)
+        db 3, ' ', 3
+        db 3 dup(3)
+
+REGS:
 REG_AX db 'AX'
 REG_BX db 'BX'
 REG_CX db 'CX'
 REG_DX db 'DX'
-REG_DI db 'DI'
+REG_DS db 'DS'
 REG_SI db 'SI'
-REG_SP db 'SP'
-REG_BP db 'BP'
+REG_ES db 'ES'
+REG_DI db 'DI'
 
 meow:
 end start

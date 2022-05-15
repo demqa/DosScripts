@@ -3,10 +3,10 @@
 org 100h
 locals @@
 
-TABLEHEIGHT = 9d
-TABLELEN    = 16d
-X_START     = 30d
-Y_START     = 8d
+TABLEHEIGHT = 10d
+TABLELEN    = 40d
+X_START     = 5d
+Y_START     = 5d
 COLOR       = 5eh
 
 ZERO        = 30h
@@ -17,6 +17,8 @@ SLASH_N     = 0Dh
 SPACE       = ' '
 
 VIDEOSEG equ 0b800h                   ; VIDEOSEG textmode
+
+CMD_LINE equ 00082h                   ; First symbol in cmd params
 
 .term  macro
        mov ax, 4c00h
@@ -35,21 +37,21 @@ VIDEOSEG equ 0b800h                   ; VIDEOSEG textmode
 
 start:
 
-       mov si, 82h
+       mov si, CMD_LINE
        lodsb
 
        mov bx, si
 
        cmp al, ONE
-       mov si, offset TOP_1
+       mov si, offset SYMB_SET_1
        je @@proceed
        
        cmp al, TWO
-       mov si, offset TOP_2
+       mov si, offset SYMB_SET_2
        je @@proceed
 
        cmp al, ZERO
-       jne @@invinp
+       jne @@err
        
        mov si, bx
 
@@ -78,10 +80,10 @@ start:
 
        mov CX, TABLELEN - 3
 
-       call ProceedText
+       call WriteText
        jmp @@ret
 
-@@invinp:
+@@err:
 
        mov ah, 09h
        mov dx, offset InvInput
@@ -96,11 +98,11 @@ start:
 ; Entry:
 ; CX       - max length of text
 ; at BGSYM - flooding symbol
-; SI       - start of text, that ends with \n (0DH)
-; 
-; Destr:
+; DS:SI    - start of text, that ends with \n (0DH)
+; ES       - VIDEOSEG (0b800h)
+; Destr: AX, DI
 ;------------------------------------------------
-ProceedText proc
+WriteText proc
 
        lodsw
        cmp ah, LETTER_T
@@ -125,7 +127,7 @@ ProceedText proc
 @@ret:
        ret
 
-            endp
+          endp
 ;------------------------------------------------
 
 
@@ -163,8 +165,7 @@ DrawTable proc
        mov cx, TABLELEN
        call DrawLine
 
-       sub di, TABLELEN * 2h
-       add di, 160d
+       add di, 160d - TABLELEN * 2d
 
        mov cx, TABLEHEIGHT
        sub cx, 2
@@ -220,16 +221,16 @@ DrawLine  proc
 
 .data
 
-TOP_1 db 0C9h, 0CDh, 0BBh
-      db 0BAh, 020h, 0BAh
-      db 0C8h, 0CDh, 0BCh
+SYMB_SET_1 db 0C9h, 0CDh, 0BBh
+           db 0BAh, 020h, 0BAh
+           db 0C8h, 0CDh, 0BCh
 
-TOP_2 db 02Bh, 02Dh, 02Bh
-      db 07Ch, 02Eh, 07Ch
-      db 02Bh, 02Dh, 02Bh
+SYMB_SET_2 db 02Bh, 02Dh, 02Bh
+           db 07Ch, 02Eh, 07Ch
+           db 02Bh, 02Dh, 02Bh
 
-InvInput db 'Invalid Input$'
+InvInput   db 'Invalid Input$'
 
-BGSYM    db 0FFh, 0FFh, 0FFh
+BGSYM      db 0FFh, 0FFh, 0FFh
 
 end start

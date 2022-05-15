@@ -23,63 +23,109 @@ start:
 
 ;------------------------------------------------
 ; Entry:
-; DS - current segment
-; SI - index of first symbol of string ending with \0 (00h)
+; ES - segment
+; DI - index of first symbol of string ending with \0 (00h)
 ; Out:
-; AX - length of text
-; Destr: AX, CX
+; CX - length of text
+; Destr: AL, Dest. flag
 ;------------------------------------------------
 Strlen proc
 
-       xor cx, cx
+       cld
+       mov cx, -1
 
-@@proceed:
-       lodsb
-       cmp al, END_OF_STRING
-       je @@ret
+       mov al, END_OF_STRING
+       repne scasb
 
-       inc cx
-       jmp @@proceed
+       neg cx
+       sub cx, 2
 
-@@ret:
-       mov ax, cx
        ret
 
        endp
 ;------------------------------------------------
-
 
 ;------------------------------------------------
 ; Entry:
-; DS - current segment
-; SI - address of string ending with 00h
-; AH - desired symbol
+; Parameters Pushing that Way:
+; First  - index   of string
+; Second - segment of string
+; Out: AX - length
+;------------------------------------------------
+StrlenC proc
+       push bp
+       mov bp, sp
+
+       push es di  
+       pushf
+
+       mov es, [bp + 4]
+       mov di, [bp + 6]
+       
+       call Strlen
+
+       mov ax, cx
+ 
+       popf
+       pop di es
+
+       pop bp
+
+       ret 2*2
+        endp
+;------------------------------------------------
+
+;------------------------------------------------
+; Entry:
+; ES - current segment
+; DI - address of string ending with 00h
+; AL - desired symbol
 ; Out:
 ; AX - address of found symbol
-; AX = 00h if there is no such symbol
 ;------------------------------------------------
 Strchr proc
 
-@@proceed:
-       lodsb
-       cmp al, END_OF_STRING
-       je @@eof
-       
-       cmp al, ah
-       jne @@proceed
+       cld
 
-       dec si
-       mov ax, si
+       repne scasb
 
-@@ret:
-       ret
+       dec di
+       mov ax, di
 
-@@eof:
-       mov ax, 00h
        ret
 
        endp
 ;------------------------------------------------
+
+;------------------------------------------------
+; Entry:
+; Parameters Pushing that Way:
+; First  - index   of string
+; Second - segment of string
+; Out: AX - address
+;------------------------------------------------
+StrchrC proc
+       push bp
+       mov bp, sp
+
+       push es di
+       pushf
+
+       mov es, [bp + 4]
+       mov di, [bp + 6]
+       mov al, [bp + 8]
+       
+       call Strchr
+
+       popf
+       pop di es
+
+       pop bp
+
+       ret 3*2
+        endp
+;------------------------------------------------
+
 
 ;------------------------------------------------
 ; Entry:
@@ -103,8 +149,40 @@ Strncpy proc
 @@ret:
        ret
 
+       endp
+;------------------------------------------------
+
+;------------------------------------------------
+; Entry:
+; Parameters Pushing that Way:
+; First   - max. number of symbols that will copy
+; Second  - destination index
+; Third   - destination segment
+; Fourth  - source index
+; Fifth   - source segment
+; Out: AX - 
+;------------------------------------------------
+StrncpyC proc
+       push bp
+       mov bp, sp
+
+       push es di ds si
+       pushf
+
+       mov ds, [bp + 4]
+       mov si, [bp + 6]
+       
+       call Strchr
+
+       popf
+       pop si ds di es
+
+       pop bp
+
+       ret 3*2
         endp
 ;------------------------------------------------
+
 
 ;------------------------------------------------
 ; Entry:
@@ -112,12 +190,13 @@ Strncpy proc
 ; SI - start index of string, containing [0-9] or -(+) in the beggining
 ; Out:
 ; AX - result integer (signed)
-; Destr: BX, DX
+; Destr: BX, DX, CL
 ;------------------------------------------------
 Atoi10 proc
 
        xor bx, bx
        xor ah, ah
+       xor cl, cl
 
        lodsb
 
@@ -138,12 +217,17 @@ Atoi10 proc
        sub al, ZERO
        xchg bl, al
 
+       jmp @@positive
+
+@@negative:
+       inc cl
+
 @@positive:
 
        lodsb
 
        cmp al, END_OF_STRING
-       je @@ret
+       je @@exit
 
        cmp al, ZERO
        jb @@err
@@ -166,33 +250,15 @@ Atoi10 proc
 ;---- jo @@overflow ----; but it will cause
 ;-----------------------; speed reduction
 
+@@exit:
+       cmp cl, 0h
+       jz @@ret
+
+       neg bx
+
 @@ret:
        mov ax, bx
-       ret
-
-@@negative:
-
-       lodsb
-
-       cmp al, END_OF_STRING
-       je @@ret
-
-       cmp al, ZERO
-       jb @@err
-       cmp al, NINE
-       ja @@err
-
-       sub al, ZERO
-
-       mov dx, bx           ; MULTIPLYING
-                            ; BY 10
-       sal bx, 2            ; 
-       add bx, dx           ; 
-       sal bx, 1            ; 
-
-       sub bx, ax
-
-       jmp @@negative
+       ret       
 
 @@err:
        mov dx, offset InvalidDN
@@ -374,35 +440,34 @@ Atoi16 proc
 ; ES - destination segment
 ; DI - destination index
 ; BX - input integer
-; Destr: AX, DX
+; Destr: AX, DX, CX
 ;------------------------------------------------
 Itoa10 proc
 
        mov cx, TEN
        
        cmp bx, 0h
+       push di
        jns @@proceed
 
        mov al, MINUS
        stosb
 
+       pop dx
+       push di
+
+       neg bx
+
 @@proceed:
 
        xor dx, dx
-       
+
        mov ax, bx    ; ax = N
-       idiv cx        ; ax = N / 10
+       idiv cx       ; ax = N / 10
 
        mov bx, ax    ; saving next integer
 
        mov ax, dx    ; ax = N % 10
-
-;------------------------------------------------
-; FIX SOMEHOW PROBLEM WITH SIGNED & reverse number
-;------------------------------------------------
-
-@@abs: neg ax
-       js @@abs
 
        add al, ZERO
 
@@ -414,18 +479,186 @@ Itoa10 proc
        mov al, END_OF_STRING
        stosb
 
+       pop bx
+       sub di, 2
+
+@@reverse:
+       mov al, es:[di]
+       mov dl, es:[bx]
+       mov es:[di], dl
+       mov es:[bx], al
+
+       inc bx
+       dec di
+
+       cmp bx, di
+       jb @@reverse
+
        ret
 
        endp
 ;------------------------------------------------
 
+;------------------------------------------------
+; Entry:
+; ES - destination segment
+; DI - destination index
+; BX - input integer
+; Destr: AX, DX
+;------------------------------------------------
+Itoa16 proc
+
+       mov dx, di
+       cld
+
+@@proceed:
+
+       mov ax, bx    ; ax = N
+
+       and ax, 0Fh
+
+       cmp ax, 9h
+       jbe @@number
+
+       add ax, LETTER_A - ZERO - 0Ah
+
+@@number:
+       add al, ZERO
+
+       stosb
+
+       shr bx, 4h
+       jnz @@proceed
+
+       mov al, END_OF_STRING
+       stosb
+
+       mov bx, dx
+       sub di, 2
+
+@@reverse:                  ; 
+       mov al, es:[di]      ;
+       mov dl, es:[bx]      ;
+       mov es:[di], dl      ;
+       mov es:[bx], al      ; I CAN DO THIS FROM STACK
+                            ; BUT IM STUPID ENOUGH
+       inc bx               ; NOT TO DO IT AGAIN 
+       dec di               ; ..................
+                            ; ..................
+       cmp bx, di           ; TILT
+       jb @@reverse         ; 
+
+       ret
+
+       endp
+;------------------------------------------------
+
+;------------------------------------------------
+; Entry:
+; ES - destination segment
+; DI - destination index
+; BX - input integer
+; Destr: AX, DX
+;------------------------------------------------
+Itoa8  proc
+
+       mov dx, di
+       cld
+
+@@proceed:
+
+       mov ax, bx    ; ax = N
+
+       and ax, 07h
+
+       add al, ZERO
+
+       stosb
+
+       shr bx, 3h
+       jnz @@proceed
+
+       mov al, END_OF_STRING
+       stosb
+
+       mov bx, dx
+       sub di, 2
+
+@@reverse:                  ; 
+       mov al, es:[di]      ;
+       mov dl, es:[bx]      ;
+       mov es:[di], dl      ;
+       mov es:[bx], al      ; I CAN DO THIS FROM STACK
+                            ; BUT IM STUPID ENOUGH
+       inc bx               ; NOT TO DO IT AGAIN 
+       dec di               ; ..................
+                            ; ..................
+       cmp bx, di           ; TILT
+       jb @@reverse         ; 
+
+       ret
+
+       endp
+;------------------------------------------------
+
+;------------------------------------------------
+; Entry:
+; ES - destination segment
+; DI - destination index
+; BX - input integer
+; Destr: AX, DX
+;------------------------------------------------
+Itoa2  proc
+
+       mov dx, di
+       cld
+
+@@proceed:
+
+       mov ax, bx    ; ax = N
+
+       and ax, 01h
+
+       add al, ZERO
+
+       stosb
+
+       shr bx, 1h
+       jnz @@proceed
+
+       mov al, END_OF_STRING
+       stosb
+
+       mov bx, dx
+       sub di, 2
+
+@@reverse:                  ; 
+       mov al, es:[di]      ;
+       mov dl, es:[bx]      ;
+       mov es:[di], dl      ;
+       mov es:[bx], al      ; I CAN DO THIS FROM STACK
+                            ; BUT IM STUPID ENOUGH
+       inc bx               ; NOT TO DO IT AGAIN 
+       dec di               ; ..................
+                            ; ..................
+       cmp bx, di           ; TILT
+       jb @@reverse         ; 
+
+       ret
+
+       endp
+;------------------------------------------------
+
+
 main:
-       mov si, offset pupa
-       call Atoi8
+       mov ax, offset pupa
+       push ax
+       push ds
+       call StrchrC
 
        mov di, offset output
-       mov bx, -10
-       call Itoa10
+       mov bx, ax
+       call Itoa16
 
        mov ah, 09h
        mov dx, offset output
@@ -435,7 +668,7 @@ main:
 
 .data
 
-pupa db '477', END_OF_STRING
+pupa db '12345', END_OF_STRING
 
 InvalidDN db 'There is not a decimal number in a string$'
 InvalidBN db 'There is not a binary  number in a string$'

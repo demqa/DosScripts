@@ -2,7 +2,7 @@
 .code
 org 100h
 locals @@
-	
+
 .term  macro
        mov ax, 4c00h
        int 21h
@@ -14,15 +14,15 @@ locals @@
        endm
 
 .skip  macro
-       xchg DX, DI
-       sub DX, TABLELEN
-       add DX, 160d
-       xchg DX, DI
+       sub DI, TABLELEN * 2
+       add DI, 160d
        sub SI, 3
        endm
 
-HEIGHT = 10d * 2
-TABLELEN  = 20d * 2
+TABLEHEIGHT = 9d
+TABLELEN    = 16d
+X           = 2d
+Y           = 3d
 
 VIDEOSEG equ 0b800h                   ; VIDEOSEG textmode
 
@@ -54,11 +54,12 @@ start:
 
        .getch
 
-       mov di, (80d * 5d + 20d) * 2
-       mov cx, TABLELEN
-       mov si, offset TOP
-       mov ah, 5eh
-       call DrawLine
+       mov SI, offset TOP
+       mov DH, 5eh
+       mov BH, X
+       mov BL, Y
+
+       call DrawTable
 	
        .getch
 
@@ -70,37 +71,37 @@ start:
 ; SI - index of 9 symbol string TL corner, TM elem, TR corner
 ;                               ML   elem, MM elem, MR   elem
 ;                               BL corner, BM elem, BR corner
-; macro TABLELEN  = length
-; macro HEIGHT = height  
+; macro TABLELEN    = length
+; macro TABLEHEIGHT = height
+; DH - symbol attribute
 ; BL - number of first line   (numeration from 0)
 ; BH - number of first symbol (numeration from 0)
 ; ES - VIDEOSEG (0b800h)
 ; Destr: DI, CX, AX, DX
 ;------------------------------------------------
 DrawTable proc
+       
+       mov AL, BL
+       mov AH, 0h
+       mov CX, 50h
+       mov BL, DH        ; saving DH from mul
+       mul CX            ; + Y * 80d
+       mov CL, BH
+       add AX, CX        ; + X
+       mov CL, 2h
+       mul CX
 
-       mov DH, 0
-       mov DL, BL
-       mul DX, 50h
-       mov BL, BH
-       mov BH, 0
-       add DX, BX
-       mul DX, 2       ; change to shift left 1
+       mov DI, AX        ; DI = (X + Y * 80) * 2
 
-       mov BL, TABLELEN   ; store length to register for speed
-
-       mov DI, DX
-
+       mov AH, BL        ; AH = attribute
        mov CX, TABLELEN
        call DrawLine
-       xchg DX, DI
-       sub DX, BL
-       add DX, 160d
-       xchg DX, DI
 
-       mov CX, TABLELEN / 2
+       sub DI, TABLELEN * 2h
+       add DI, 160d
+
+       mov CX, TABLEHEIGHT
        sub CX, 2
-
 @@mid: 
        xchg CX, DX
 
@@ -152,7 +153,7 @@ DrawLine  proc
 .data
 
 TOP db 0C9h, 0CDh, 0BBh
-MID db 0BAh, 020h, 0BAh
-BOT db 0C8h, 0CDh, 0BCh
+    db 0BAh, 020h, 0BAh
+    db 0C8h, 0CDh, 0BCh
 
 end start

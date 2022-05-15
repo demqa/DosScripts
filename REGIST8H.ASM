@@ -26,8 +26,8 @@ DIFFERENCE    = (80d - TABLELEN) * 2
 VIDEOSEG_SIZE = 80d * 25d * 2d
 
 VIDEOSEG_0    = (Y_START * 80d + X_START) * 2d
-VIDEOSEG_1    = VIDEOSEG_0 + VIDEOSEG_SIZE / 2 - 160d
-VIDEOSEG_2    = VIDEOSEG_1 + TABLELEN * 2
+VIDEOSEG_1    = VIDEOSEG_0 + VIDEOSEG_SIZE
+VIDEOSEG_2    = VIDEOSEG_1 + VIDEOSEG_SIZE
 
 END_OF_STRING = 0
 
@@ -37,19 +37,6 @@ END_OF_STRING = 0
        endm
 
 start:
-
-;        mov ax, cs
-;        mov ds, ax
-;        mov si, offset cs:SYMBOLS
-;        mov dh, COLOR
-;        mov bl, Y_START
-;        mov bh, X_START
-;        mov ax, VIDEOSEG
-;        mov es, ax
-;        push di es si ds dx cx bx ax
-;        mov  di, VIDEOSEG_0 + 80 * 2 + 4
-;        push di
-;        call DrawFrame
 
         jmp execute
 
@@ -114,45 +101,35 @@ Hack08:
 ;================================================
 
 ;======Saving Registers to Print=================
-;       push di es si ds dx cx bx ax
+        push di es si ds dx cx bx ax
 ;================================================
 
 ;======Here I have to save changes===============
-;       params
-;       call GetChanges
+        call GetChanges
 ;================================================
 
 ;======Here I have to Draw Frame with Registers==
-;       params
-;       call DrawFrame
-;================================================
-
-;======Print Register AX===========================
-        mov bx, ax
-
-        mov ax, offset cs:buff
-        mov di, ax
-
-        mov ax, cs
-        mov es, ax
-
-        call Itoa16
-
-        mov ax, VIDEOSEG
-        mov es, ax   
-
-        mov di, (80 * 10 + 40) * 2          ; 40 symb on 11th line
-
-        mov ax, offset cs:buff
-        mov si, ax
-
         mov ax, cs
         mov ds, ax
 
-        mov ah, COLOR
+        mov si, offset cs:SYMBOLS
 
-        mov cx, 4h
-        call PrintString
+        mov dh, COLOR
+
+        mov bl, Y_START
+        mov bh, X_START
+
+        mov ax, VIDEOSEG
+        mov es, ax
+
+        call DrawFrame
+;================================================
+
+;======Here I have to Save Frame==================
+        mov  si, VIDEOSEG_0
+        mov  di, VIDEOSEG_2
+
+        call SaveArea
 ;================================================
 
 ;======Recovering Registers======================
@@ -200,13 +177,16 @@ Hack09:
 
 @@activate:
 
+        pop ax
+        push ax
+
 ;======Saving Registers==========================
         push di es si ds dx cx bx ax
         pushf
 ;================================================
 
 ;======Saving Registers To Print=================
-;       push di es si ds dx cx bx ax
+        push di es si ds dx cx bx ax
 ;================================================
 
 ;======Here I have to Save Area==================
@@ -229,16 +209,10 @@ Hack09:
         mov bl, Y_START
         mov bh, X_START
 
-        mov ax, VIDEOSEG
-        mov es, ax
-
-        call DrawTable
+        call DrawFrame
 ;================================================
 
 ;======Here I want to Save Copy of Frame=========
-        mov  ax, VIDEOSEG
-        mov  es, ax
-
         mov  si, VIDEOSEG_0
         mov  di, VIDEOSEG_2
 
@@ -310,6 +284,47 @@ SaveArea proc
 ;================================================
 
 ;================================================
+; Destr:
+; DS, SI, ES, DI, AX, CX
+;================================================
+GetChanges proc
+
+        mov ax, VIDEOSEG
+        mov es, ax
+        mov ds, ax
+
+        mov si, VIDEOSEG_0 
+        mov di, VIDEOSEG_2
+
+        mov cx, TABLEHEIGHT
+
+@@check_table:
+
+        xchg cx, dx
+
+        mov cx, TABLELEN
+
+@@check_line:
+        cmpsw
+        je @@next_symbol
+
+        mov ax, es:[si-2]
+        mov es:[si-2+VIDEOSEG_1-VIDEOSEG_0], ax
+
+@@next_symbol:
+        loop @@check_line
+
+        add si, DIFFERENCE
+        add di, DIFFERENCE
+
+        xchg cx, dx
+        loop @@check_table
+
+        ret
+           endp
+;================================================
+
+;================================================
 ; Entry:
 ; DS - current segment
 ; SI - index of 9 symbol string TL corner, TM elem, TR corner
@@ -322,7 +337,7 @@ SaveArea proc
 ; BH - number of first symbol (numeration from 0)
 ; ES - VIDEOSEG (0b800h)
 ; Stack:
-; ELEM ON TOP - index from where program will write AX 1234
+;                                                   AX 1234
 ; ELEMS from TOP: ax bx cx dx ds si es di           ^
 ; That would be printed in that format ------------ ^
 ; Destr: DI, CX, AX, DX
@@ -331,10 +346,7 @@ DrawFrame proc
 
         call DrawTable
 
-        pop  bx
-        pop  di
-        push di
-        push bx
+        mov di, VIDEOSEG_0 + (2 * 80d + 2) * 2
 
         push di
 
@@ -355,7 +367,7 @@ DrawFrame proc
         xchg cx, dx
         loop @@printing_names
 
-@@next:
+@@numbers:
         pop  di
         add  di, 3d * 2
 
@@ -363,7 +375,9 @@ DrawFrame proc
 @@printing_numbers:
         xchg cx, dx
 
-        pop bx             ; number to print
+        pop  ax            ; return code
+        pop  bx            ; number to print
+        push ax            ; return code
 
         push di
 
@@ -372,9 +386,7 @@ DrawFrame proc
         
         mov di, offset cs:buff
 
-        push dx
         call Itoa16     
-        pop dx
 
         mov si, cs
         mov ds, si
@@ -499,11 +511,9 @@ DrawLine proc
 ; Destr: AX, CX
 ;================================================
 PrintString      proc
-        push ax cx
 @@out:  lodsb
         stosw        
         loop @@out
-        pop  cx ax
         ret
             endp
 ;================================================
@@ -517,6 +527,7 @@ PrintString      proc
 ;================================================
 Itoa16 proc
 
+; TODO:
         push ax cx dx
 
         mov dx, di
@@ -570,7 +581,7 @@ Itoa16 proc
 activated db 0          ; 0     if turned off
                         ; other if turned on
 
-buff db 4 dup(0)
+buff db 5 dup(0)
 
 SYMBOLS db 3 dup(3)
         db 3, ' ', 3

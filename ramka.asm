@@ -14,55 +14,83 @@ locals @@
        endm
 
 .skip  macro
-       sub DI, TABLELEN * 2
-       add DI, 160d
-       sub SI, 3
+       add di, 160d - TABLELEN * 2
+       sub si, 3
        endm
 
 TABLEHEIGHT = 9d
 TABLELEN    = 16d
-X           = 2d
-Y           = 3d
+X_START     = 2d
+Y_START     = 3d
+COLOR       = 5eh
+
+ZERO        = 30h
+ONE         = 31h
+TWO         = 32h
+LETTER_T    = 'T'
+SLASH_N       = 0Dh
 
 VIDEOSEG equ 0b800h                   ; VIDEOSEG textmode
 
 start:
-       mov ax, 0106h
-       jmp ax                         ; JUMP after $
-       
-       db '$'
-
-       mov ah, 09h
-       mov dx, 82h
-       int 21h
 
        mov si, 82h
        lodsb
+
+       mov bx, si
+
+       cmp al, ONE
+       mov si, offset TOP_1
+       je @@mid
        
-       mov ah, 02h 
-       int 21h
+       cmp al, TWO
+       mov si, offset TOP_2
+       je @@mid
+
+       cmp al, ZERO
+       jne @@invinp
+       
+       mov si, bx
+
+       add si, 10d
+       mov bx, si
+       sub si, 9d
+
+@@mid:
+       push bx
 
        mov ax, VIDEOSEG     
-       mov es, ax                     ;  es = VIDEOSEG
+       mov es, ax               ; es = VIDEOSEG
 
-       mov bx, (80d * 1d + 40d) * 2
-
-       mov ah, 5eh                    ;  BG = VIOLET, LETTER = YELLOW
-
-       mov byte ptr es:[bx],   'A'    ;  UL corner = A
-       mov byte ptr es:[bx+1],  ah    
-
-       .getch
-
-       mov SI, offset TOP
-       mov DH, 5eh
-       mov BH, X
-       mov BL, Y
-
+       mov DH, COLOR            ; BG = VIOLET, LETTER = YELLOW
+       mov BH, X_START
+       mov BL, Y_START
        call DrawTable
-	
-       .getch
 
+       pop si
+@@txt:
+       lodsw
+       cmp ah, LETTER_T
+       jne @@ret
+
+       mov ah, COLOR
+       mov di, ((Y_START + TABLEHEIGHT / 2) * 50h + X_START + 1) * 2
+
+@@cycle:
+       lodsb
+       cmp al, SLASH_N
+       je @@ret
+       stosw
+       jmp @@cycle
+
+@@invinp:
+
+       mov ax, offset InvInput 
+       mov dh, 09h
+
+       int 21h
+
+@@ret:
        .term
 
 ;------------------------------------------------
@@ -81,42 +109,44 @@ start:
 ;------------------------------------------------
 DrawTable proc
        
-       mov AL, BL
-       mov AH, 0h
-       mov CX, 50h
-       mov BL, DH        ; saving DH from mul
-       mul CX            ; + Y * 80d
-       mov CL, BH
-       add AX, CX        ; + X
-       mov CL, 2h
-       mul CX
+       mov al, bl
+       mov ah, 0h
+       mov cx, 50h
+       mov bl, dh        ; saving DH from mul
+       mul cx            ; + Y_START * 80d
+       mov cl, bh
+       add ax, cx        ; + X_START
+       mov cl, 2h
+       mul cl
 
-       mov DI, AX        ; DI = (X + Y * 80) * 2
+       mov di, ax        ; DI = (X_START + Y_START * 80) * 2
 
-       mov AH, BL        ; AH = attribute
-       mov CX, TABLELEN
+       mov ah, bl        ; AH = attribute
+       mov cx, TABLELEN
        call DrawLine
 
-       sub DI, TABLELEN * 2h
-       add DI, 160d
+       sub di, TABLELEN * 2h
+       add di, 160d
 
-       mov CX, TABLEHEIGHT
-       sub CX, 2
-@@mid: 
-       xchg CX, DX
+       mov cx, TABLEHEIGHT
+       sub cx, 2
 
-       mov CX, TABLELEN
+@@mid:
+       xchg cx, dx
+
+       mov cx, TABLELEN
        call DrawLine
        .skip
 
-       xchg CX, DX
+       xchg cx, dx
        loop @@mid
 
-       add SI, 3
-       add CX, TABLELEN
+       add si, 3
+       add cx, TABLELEN
        call DrawLine
 
        ret
+
           endp
 ;------------------------------------------------
 
@@ -152,8 +182,14 @@ DrawLine  proc
 
 .data
 
-TOP db 0C9h, 0CDh, 0BBh
-    db 0BAh, 020h, 0BAh
-    db 0C8h, 0CDh, 0BCh
+TOP_1 db 0C9h, 0CDh, 0BBh
+      db 0BAh, 020h, 0BAh
+      db 0C8h, 0CDh, 0BCh
+
+TOP_2 db 02Bh, 02Dh, 02Bh
+      db 07Ch, 02Eh, 07Ch
+      db 02Bh, 02Dh, 02Bh
+
+InvInput db 'Invalid Input$'
 
 end start

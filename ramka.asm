@@ -62,7 +62,7 @@ start:
 @@proceed:
        push bx
 
-       mov ax, VIDEOSEG     
+       mov ax, VIDEOSEG
        mov es, ax               ; es = VIDEOSEG
 
        mov bx, si

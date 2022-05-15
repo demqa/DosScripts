@@ -2,6 +2,8 @@
 .code
 org 100h
 
+.386
+
 locals @@
 
 INT08H        = 08h
@@ -43,7 +45,7 @@ start:
 execute:
 ;======Now Lets Change Interruption Vectors======
 
-        mov ax, 3500h + INT08H                ; Get Interrupt Vector
+        mov ax, 3500h or INT08H                ; Get Interrupt Vector
         int 21h                               ; of Int08h
 
         mov word ptr OldInt8,     bx          ; There I Can Save Old Interruption
@@ -51,11 +53,11 @@ execute:
         mov word ptr OldInt8 + 2, ax          ; Hide My Interception
 
         mov dx, offset Hack08                 ; Set Interrupt Vector
-        mov ax, 2500h + INT08H                ; on My Own Function (ds:dx)
+        mov ax, 2500h or INT08H                ; on My Own Function (ds:dx)
         int 21h                               ; I Don't Have To Do cli Before This Func
 
 
-        mov ax, 3500h + INT09H                ; Get Interrupt Vector
+        mov ax, 3500h or INT09H                ; Get Interrupt Vector
         int 21h                               ; of Int09h
 
         mov word ptr OldInt9,     bx          ; There I Can Save Old Interruption
@@ -63,13 +65,13 @@ execute:
         mov word ptr OldInt9 + 2, ax          ; Hide My Interception
 
         mov dx, offset Hack09                 ; Set Interrupt Vector
-        mov ax, 2500h + INT09H                ; on My Own Function (ds:dx)
+        mov ax, 2500h or INT09H                ; on My Own Function (ds:dx)
         int 21h                               ; I Don't Have To Do cli Before This Func
 
 
-        mov ax, 3100h
-        mov dx, offset meow + 0Fh
-        shr dx, 4
+        mov ax, 3100h                         ; Terminate
+        mov dx, offset meow + 0Fh             ; &
+        shr dx, 4                             ; Stay Resident
         int 21h
 ;================================================
 
@@ -77,19 +79,19 @@ Hack08:
 ;======It Is Hacked Int08h=======================
 
 ;======Checking Mode in top left corner==========
-        push es di ax
+ ;        push es di ax
         
-        mov ax, VIDEOSEG
-        mov es, ax 
+ ;        mov ax, VIDEOSEG
+ ;        mov es, ax 
+ 
+ ;        mov di, 00h
 
-        mov di, 00h
+ ;        mov ah, COLOR
+ ;        mov al, cs:activated
 
-        mov ah, COLOR
-        mov al, cs:activated
+ ;        stosw
 
-        stosw
-
-        pop ax di es
+ ;        pop ax di es
 ;================================================
 
         cmp cs:activated, 0h
@@ -155,6 +157,10 @@ Hack09:
         jne @@exit_default
 
 @@unactivate:
+
+        cmp cs:activated, 00h
+        je @@exit_intercept
+
         mov byte ptr cs:activated, 00h
 
 ;======Here I have to recover area===============
@@ -176,6 +182,9 @@ Hack09:
         jmp @@exit_intercept
 
 @@activate:
+
+        cmp cs:activated, 02d
+        je @@exit_intercept
 
         pop ax
         push ax
@@ -279,6 +288,7 @@ SaveArea proc
         xchg cx, ax
         loop @@save_area
 
+@@ret:
         ret
          endp
 ;================================================
@@ -320,6 +330,7 @@ GetChanges proc
         xchg cx, dx
         loop @@check_table
 
+@@ret:
         ret
            endp
 ;================================================
@@ -527,7 +538,6 @@ PrintString      proc
 ;================================================
 Itoa16 proc
 
-; TODO:
         push ax cx dx
 
         mov dx, di
@@ -558,7 +568,7 @@ Itoa16 proc
         mov bx, dx
         sub di, 2
 
-@@reverse:                   ; 
+@@reverse:
         mov al, es:[di]      ;
         mov dl, es:[bx]      ;
         mov es:[di], dl      ;

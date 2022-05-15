@@ -3,6 +3,21 @@
 org 100h
 locals @@
 
+TABLEHEIGHT = 9d
+TABLELEN    = 16d
+X_START     = 30d
+Y_START     = 8d
+COLOR       = 5eh
+
+ZERO        = 30h
+ONE         = 31h
+TWO         = 32h
+LETTER_T    = 'T'
+SLASH_N     = 0Dh
+SPACE       = ' '
+
+VIDEOSEG equ 0b800h                   ; VIDEOSEG textmode
+
 .term  macro
        mov ax, 4c00h
        int 21h
@@ -18,20 +33,6 @@ locals @@
        sub si, 3
        endm
 
-TABLEHEIGHT = 9d
-TABLELEN    = 16d
-X_START     = 2d
-Y_START     = 3d
-COLOR       = 5eh
-
-ZERO        = 30h
-ONE         = 31h
-TWO         = 32h
-LETTER_T    = 'T'
-SLASH_N       = 0Dh
-
-VIDEOSEG equ 0b800h                   ; VIDEOSEG textmode
-
 start:
 
        mov si, 82h
@@ -41,11 +42,11 @@ start:
 
        cmp al, ONE
        mov si, offset TOP_1
-       je @@mid
+       je @@proceed
        
        cmp al, TWO
        mov si, offset TOP_2
-       je @@mid
+       je @@proceed
 
        cmp al, ZERO
        jne @@invinp
@@ -56,11 +57,17 @@ start:
        mov bx, si
        sub si, 9d
 
-@@mid:
+@@proceed:
        push bx
 
        mov ax, VIDEOSEG     
        mov es, ax               ; es = VIDEOSEG
+
+       mov bx, si
+       mov ax, [bx+4]
+
+       mov bx, offset BGSYM
+       mov [bx], ax
 
        mov DH, COLOR            ; BG = VIOLET, LETTER = YELLOW
        mov BH, X_START
@@ -68,7 +75,33 @@ start:
        call DrawTable
 
        pop si
-@@txt:
+
+       mov CX, TABLELEN - 3
+
+       call ProceedText
+       jmp @@ret
+
+@@invinp:
+
+       mov ah, 09h
+       mov dx, offset InvInput
+
+       int 21h
+
+@@ret:
+       .term
+
+
+;------------------------------------------------
+; Entry:
+; CX       - max length of text
+; at BGSYM - flooding symbol
+; SI       - start of text, that ends with \n (0DH)
+; 
+; Destr:
+;------------------------------------------------
+ProceedText proc
+
        lodsw
        cmp ah, LETTER_T
        jne @@ret
@@ -79,19 +112,24 @@ start:
 @@cycle:
        lodsb
        cmp al, SLASH_N
-       je @@ret
+       je  @@ret
+       cmp al, SPACE
+       jne @@proceed
+       mov al, BGSYM
+
+@@proceed:
        stosw
-       jmp @@cycle
 
-@@invinp:
-
-       mov ax, offset InvInput 
-       mov dh, 09h
-
-       int 21h
+       loop @@cycle
 
 @@ret:
-       .term
+       ret
+
+            endp
+;------------------------------------------------
+
+
+
 
 ;------------------------------------------------
 ; Entry:
@@ -116,8 +154,8 @@ DrawTable proc
        mul cx            ; + Y_START * 80d
        mov cl, bh
        add ax, cx        ; + X_START
-       mov cl, 2h
-       mul cl
+       mov cx, 2h
+       mul cx
 
        mov di, ax        ; DI = (X_START + Y_START * 80) * 2
 
@@ -131,7 +169,7 @@ DrawTable proc
        mov cx, TABLEHEIGHT
        sub cx, 2
 
-@@mid:
+@@cycle:
        xchg cx, dx
 
        mov cx, TABLELEN
@@ -139,7 +177,7 @@ DrawTable proc
        .skip
 
        xchg cx, dx
-       loop @@mid
+       loop @@cycle
 
        add si, 3
        add cx, TABLELEN
@@ -191,5 +229,7 @@ TOP_2 db 02Bh, 02Dh, 02Bh
       db 02Bh, 02Dh, 02Bh
 
 InvInput db 'Invalid Input$'
+
+BGSYM    db 0FFh, 0FFh, 0FFh
 
 end start
